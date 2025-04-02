@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "usb/usb_host.h"
-#include "esp_usb.h"
+#include "usb/usb_common.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 

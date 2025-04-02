@@ -14,6 +14,10 @@ HostBox3Component::~HostBox3Component() {
   usb_host_uninstall();
   if (usb_task_handle) vTaskDelete(usb_task_handle);
 }
+void HostBox3Component::dump_config() {
+  ESP_LOGCONFIG(TAG, "HostBox3Component:");
+  ESP_LOGCONFIG(TAG, "  USB Host is %s", usb_audio_initialized ? "initialized" : "not initialized");
+}
 
 void HostBox3Component::setup() {
   ESP_LOGCONFIG(TAG, "Initializing ESP32-S3-BOX3 USB Audio Host...");

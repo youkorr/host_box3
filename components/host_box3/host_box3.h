@@ -3,16 +3,11 @@
 #include "esphome/core/component.h"
 #include "esphome/components/media_player/media_player.h"
 
-// Inclusions nécessaires pour le USB Audio Class Host
-#include "esp_system.h"
+// Use ESP-IDF's USB host headers
+#include "driver/usb_host.h"
+#include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "usb/usb_host.h"
-#include "usb/uac_host.h"
-#include "usb/usb_phy.h"
-
-
-
 
 namespace esphome {
 namespace host_box3 {
@@ -27,20 +22,15 @@ class HostBox3Component : public Component {
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
   
-  // Configuration du périphérique audio USB
-  void init_usb_audio();
-  bool route_audio_to_usb();
+  void init_usb_host();
+  bool init_usb_audio();
   
  private:
-  // Variables pour gérer l'audio USB
-  usb_host_client_handle_t client_hdl;
-  uac_host_handle_t uac_handle;
-  usb_phy_handle_t phy_hdl;  // Gestionnaire de l'interface physique USB
-  bool usb_audio_initialized = false;
+  usb_host_client_handle_t client_hdl_;
+  bool usb_initialized_ = false;
+  TaskHandle_t usb_task_handle_ = nullptr;
   
-  // Tâche pour gérer les événements USB
   static void usb_event_task(void *arg);
-  TaskHandle_t usb_task_handle;
 };
 
 }  // namespace host_box3

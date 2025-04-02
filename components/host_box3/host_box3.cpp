@@ -13,6 +13,7 @@ static const char *TAG = "host_box3";
 namespace esphome {
 namespace host_box3 {
 
+// Structure pour stocker les informations des périphériques USB
 typedef struct {
     uint8_t dev_addr;
     usb_device_handle_t dev_hdl;
@@ -20,6 +21,7 @@ typedef struct {
     uint16_t pid;
 } usb_device_info_t;
 
+// Variables globales pour le traitement USB
 static QueueHandle_t usb_event_queue;
 static usb_device_info_t usb_device_info;
 
@@ -67,9 +69,9 @@ void HostBox3Component::loop() {
 
 void HostBox3Component::init_usb_audio() {
     ESP_LOGI(TAG, "Initializing USB Host...");
-    
-    gpio_set_pull_mode(GPIO_NUM_2, GPIO_FLOATING);
-    gpio_set_pull_mode(GPIO_NUM_6, GPIO_FLOATING);
+
+    gpio_set_direction(GPIO_NUM_2, GPIO_MODE_INPUT_OUTPUT);
+    gpio_set_direction(GPIO_NUM_6, GPIO_MODE_INPUT_OUTPUT);
 
     const usb_host_config_t host_config = {
         .skip_phy_setup = false,
@@ -101,74 +103,27 @@ void HostBox3Component::init_usb_audio() {
     xTaskCreate(usb_event_task, "usb_events", 4096, this, 5, &usb_task_handle);
 }
 
-bool HostBox3Component::route_audio_to_usb() {
-    if (!usb_device_info.dev_hdl) {
-        ESP_LOGD(TAG, "Waiting for USB audio device...");
-        return false;
-    }
-    ESP_LOGI(TAG, "Routing audio to USB device VID:0x%04X, PID:0x%04X", usb_device_info.vid, usb_device_info.pid);
-    return true;
-}
-
 void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg) {
     HostBox3Component *self = static_cast<HostBox3Component *>(arg);
-    
+    usb_audio_event_t evt;
+
     switch (event_msg->event) {
         case USB_HOST_CLIENT_EVENT_NEW_DEV:
             ESP_LOGI(TAG, "New USB device connected");
-            usb_audio_event_t evt = { USB_AUDIO_DEVICE_CONNECTED, (void *)(uintptr_t)event_msg->new_dev.address };
+            evt.event_id = USB_AUDIO_DEVICE_CONNECTED;
+            evt.data = (void *)(uintptr_t)event_msg->new_dev.address;
             xQueueSend(usb_event_queue, &evt, portMAX_DELAY);
             break;
+
         case USB_HOST_CLIENT_EVENT_DEV_GONE:
             ESP_LOGI(TAG, "USB device disconnected");
-            usb_audio_event_t evt_dis = { USB_AUDIO_DEVICE_DISCONNECTED, NULL };
-            xQueueSend(usb_event_queue, &evt_dis, portMAX_DELAY);
+            evt.event_id = USB_AUDIO_DEVICE_DISCONNECTED;
+            evt.data = NULL;
+            xQueueSend(usb_event_queue, &evt, portMAX_DELAY);
             break;
+
         default:
             break;
-    }
-}
-
-void HostBox3Component::process_usb_event(usb_audio_event_t *event) {
-    uint8_t dev_addr;
-    switch (event->event_id) {
-        case USB_AUDIO_DEVICE_CONNECTED:
-            dev_addr = (uint8_t)((uintptr_t)event->data);
-            process_device_connection(dev_addr);
-            break;
-        case USB_AUDIO_DEVICE_DISCONNECTED:
-            process_device_disconnection();
-            break;
-        default:
-            break;
-    }
-}
-
-void HostBox3Component::process_device_connection(uint8_t dev_addr) {
-    esp_err_t err = usb_host_device_open(client_hdl, dev_addr, &usb_device_info.dev_hdl);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open USB device: %s", esp_err_to_name(err));
-        return;
-    }
-    const usb_device_desc_t *dev_desc;
-    err = usb_host_get_device_descriptor(usb_device_info.dev_hdl, &dev_desc);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get device descriptor: %s", esp_err_to_name(err));
-        usb_host_device_close(client_hdl, usb_device_info.dev_hdl);
-        usb_device_info.dev_hdl = NULL;
-        return;
-    }
-    usb_device_info.vid = dev_desc->idVendor;
-    usb_device_info.pid = dev_desc->idProduct;
-    ESP_LOGI(TAG, "USB Device connected: VID:0x%04X, PID:0x%04X", usb_device_info.vid, usb_device_info.pid);
-}
-
-void HostBox3Component::process_device_disconnection() {
-    if (usb_device_info.dev_hdl) {
-        usb_host_device_close(client_hdl, usb_device_info.dev_hdl);
-        usb_device_info.dev_hdl = NULL;
-        ESP_LOGI(TAG, "USB device closed");
-        usb_audio_initialized = false;
     }
 }
 
@@ -183,5 +138,6 @@ void HostBox3Component::usb_event_task(void *arg) {
 
 }  // namespace host_box3
 }  // namespace esphome
+
 
 

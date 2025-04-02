@@ -6,6 +6,7 @@
 #include "esp_err.h"
 #include "usb/usb_host.h"
 #include "driver/gpio.h"
+#include "freertos/queue.h"
 
 static const char *TAG = "host_box3";
 

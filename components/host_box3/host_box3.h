@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "usb/usb_host.h"
-#include "usb/usb_phy.h"  // Pour usb_phy_config_t
+#include "esp_private/usb_phy.h"  // Pour usb_phy_config_t
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 

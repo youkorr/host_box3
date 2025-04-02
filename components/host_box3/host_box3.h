@@ -2,12 +2,11 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/media_player/media_player.h"
+#include "esphome/core/helpers.h"
+#include "esphome/core/log.h"
 
-// Use ESP-IDF's USB host headers
-#include "driver/usb_host.h"
-#include "esp_err.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+// Utilisation des headers ESPHome au lieu des headers ESP-IDF
+#include "esp32-hal-usb.h"
 
 namespace esphome {
 namespace host_box3 {
@@ -22,15 +21,14 @@ class HostBox3Component : public Component {
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
   
-  void init_usb_host();
+  void init_usb();
   bool init_usb_audio();
   
  private:
-  usb_host_client_handle_t client_hdl_;
   bool usb_initialized_ = false;
-  TaskHandle_t usb_task_handle_ = nullptr;
   
-  static void usb_event_task(void *arg);
+  static void usb_event_callback(void* arg, esp_event_base_t event_base, 
+                               int32_t event_id, void* event_data);
 };
 
 }  // namespace host_box3

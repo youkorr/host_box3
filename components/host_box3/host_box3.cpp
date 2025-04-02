@@ -1,72 +1,251 @@
 #include "host_box3.h"
 #include "esphome/core/log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_log.h"
+#include "esp_err.h"
+#include "usb/usb_host.h"
+#include "driver/gpio.h"
 
 static const char *TAG = "host_box3";
 
 namespace esphome {
 namespace host_box3 {
 
+// Définition des événements USB
+enum {
+    USB_AUDIO_DEVICE_CONNECTED,
+    USB_AUDIO_DEVICE_DISCONNECTED,
+    USB_AUDIO_STREAM_STARTED,
+    USB_AUDIO_STREAM_STOPPED,
+};
+
+// Événement de file d'attente USB
+typedef struct {
+    int event_id;
+    void *data;
+} usb_audio_event_t;
+
+// Structure pour stocker les informations des périphériques USB
+typedef struct {
+    uint8_t dev_addr;
+    usb_device_handle_t dev_hdl;
+    uint16_t vid;
+    uint16_t pid;
+} usb_device_info_t;
+
+// Variables globales pour le traitement USB
+static QueueHandle_t usb_event_queue;
+static usb_device_info_t usb_device_info;
+
 HostBox3Component::HostBox3Component()
-    : client_hdl(nullptr), usb_audio_initialized(false) {}
+    : client_hdl(nullptr), usb_audio_initialized(false), usb_task_handle(nullptr) {
+    // Créer la file d'attente d'événements USB
+    usb_event_queue = xQueueCreate(10, sizeof(usb_audio_event_t));
+}
 
 HostBox3Component::~HostBox3Component() {
-  if (client_hdl) usb_host_client_deregister(client_hdl);
-  usb_host_uninstall();
-  if (usb_task_handle) vTaskDelete(usb_task_handle);
+    if (client_hdl) {
+        usb_host_client_deregister(client_hdl);
+    }
+    usb_host_uninstall();
+    if (usb_task_handle) {
+        vTaskDelete(usb_task_handle);
+    }
+    if (usb_event_queue) {
+        vQueueDelete(usb_event_queue);
+    }
 }
+
 void HostBox3Component::dump_config() {
-  ESP_LOGCONFIG(TAG, "HostBox3Component:");
-  ESP_LOGCONFIG(TAG, "  USB Host is %s", usb_audio_initialized ? "initialized" : "not initialized");
+    ESP_LOGCONFIG(TAG, "HostBox3Component:");
+    ESP_LOGCONFIG(TAG, "  USB Host is %s", usb_audio_initialized ? "initialized" : "not initialized");
 }
 
 void HostBox3Component::setup() {
-  ESP_LOGCONFIG(TAG, "Initializing ESP32-S3-BOX3 USB Audio Host...");
-  init_usb_audio();
+    ESP_LOGCONFIG(TAG, "Initializing ESP32-S3-BOX3 USB Audio Host...");
+    init_usb_audio();
 }
 
 void HostBox3Component::loop() {
-  if (!usb_audio_initialized) {
-    if (route_audio_to_usb()) {
-      ESP_LOGI(TAG, "USB Audio successfully initialized");
-      usb_audio_initialized = true;
+    if (!usb_audio_initialized) {
+        if (route_audio_to_usb()) {
+            ESP_LOGI(TAG, "USB Audio successfully initialized");
+            usb_audio_initialized = true;
+        }
     }
-  }
+
+    // Traiter les événements USB
+    usb_audio_event_t event;
+    if (xQueueReceive(usb_event_queue, &event, 0) == pdTRUE) {
+        process_usb_event(&event);
+    }
 }
 
 void HostBox3Component::init_usb_audio() {
-  ESP_LOGI(TAG, "Initializing USB Host...");
-
-  const usb_host_config_t host_config = {
-      .skip_phy_setup = false,
-      .intr_flags = ESP_INTR_FLAG_LEVEL3,
-  };
-
-  // Initialisation du contrôleur USB Host
-  ESP_ERROR_CHECK(usb_host_install(&host_config));
-
-  const usb_host_client_config_t client_config = {
-      .is_synchronous = false,
-      .max_num_event_msg = 5,
-  };
-
-  ESP_ERROR_CHECK(usb_host_client_register(&client_config, &client_hdl));
-  xTaskCreate(usb_event_task, "usb_events", 4096, this, 5, &usb_task_handle);
+    ESP_LOGI(TAG, "Initializing USB Host...");
+    
+    // Configuration du contrôleur USB Host
+    const usb_host_config_t host_config = {
+        .skip_phy_setup = false,
+        .intr_flags = ESP_INTR_FLAG_LEVEL1,
+    };
+    
+    // Installation du contrôleur USB Host
+    esp_err_t err = usb_host_install(&host_config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "USB Host installation failed: %s", esp_err_to_name(err));
+        return;
+    }
+    
+    // Configuration du client USB
+    const usb_host_client_config_t client_config = {
+        .is_synchronous = false,
+        .max_num_event_msg = 5,
+        .async = {
+            .client_event_callback = client_event_callback,
+            .callback_arg = this,
+        }
+    };
+    
+    // Enregistrement du client USB
+    err = usb_host_client_register(&client_config, &client_hdl);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "USB Host client registration failed: %s", esp_err_to_name(err));
+        usb_host_uninstall();
+        return;
+    }
+    
+    // Création de la tâche USB
+    xTaskCreate(usb_event_task, "usb_events", 4096, this, 5, &usb_task_handle);
 }
 
 bool HostBox3Component::route_audio_to_usb() {
-  // Implémentez la logique de routage audio ici
-  return true;  // Placeholder
+    // Si le périphérique audio USB n'est pas encore détecté
+    if (!usb_device_info.dev_hdl) {
+        ESP_LOGD(TAG, "Waiting for USB audio device...");
+        return false;
+    }
+    
+    // Configuration du routage audio
+    ESP_LOGI(TAG, "Routing audio to USB device VID:0x%04X, PID:0x%04X", 
+             usb_device_info.vid, usb_device_info.pid);
+    
+    // Ici, ajoutez le code spécifique pour configurer le codec audio du BOX3
+    // en vous basant sur l'exemple mp3_demo
+    
+    return true;
+}
+
+void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg) {
+    HostBox3Component *self = static_cast<HostBox3Component *>(arg);
+    
+    switch (event_msg->event) {
+        case USB_HOST_CLIENT_EVENT_NEW_DEV:
+            ESP_LOGI(TAG, "New USB device connected");
+            usb_audio_event_t evt = {
+                .event_id = USB_AUDIO_DEVICE_CONNECTED,
+                .data = (void *)event_msg->new_dev.address
+            };
+            xQueueSend(usb_event_queue, &evt, portMAX_DELAY);
+            break;
+            
+        case USB_HOST_CLIENT_EVENT_DEV_GONE:
+            ESP_LOGI(TAG, "USB device disconnected");
+            usb_audio_event_t evt = {
+                .event_id = USB_AUDIO_DEVICE_DISCONNECTED,
+                .data = NULL
+            };
+            xQueueSend(usb_event_queue, &evt, portMAX_DELAY);
+            break;
+            
+        default:
+            break;
+    }
+}
+
+void HostBox3Component::process_usb_event(usb_audio_event_t *event) {
+    switch (event->event_id) {
+        case USB_AUDIO_DEVICE_CONNECTED:
+            // Traiter la connexion d'un périphérique USB
+            uint8_t dev_addr = (uint8_t)((uint32_t)event->data);
+            process_device_connection(dev_addr);
+            break;
+            
+        case USB_AUDIO_DEVICE_DISCONNECTED:
+            // Traiter la déconnexion d'un périphérique USB
+            process_device_disconnection();
+            break;
+            
+        case USB_AUDIO_STREAM_STARTED:
+            ESP_LOGI(TAG, "USB Audio stream started");
+            break;
+            
+        case USB_AUDIO_STREAM_STOPPED:
+            ESP_LOGI(TAG, "USB Audio stream stopped");
+            break;
+            
+        default:
+            break;
+    }
+}
+
+void HostBox3Component::process_device_connection(uint8_t dev_addr) {
+    esp_err_t err;
+    
+    // Ouvrir le périphérique
+    err = usb_host_device_open(client_hdl, dev_addr, &usb_device_info.dev_hdl);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open USB device: %s", esp_err_to_name(err));
+        return;
+    }
+    
+    // Obtenir le descripteur du périphérique
+    usb_device_info_t *dev_info = &usb_device_info;
+    dev_info->dev_addr = dev_addr;
+    
+    usb_device_desc_t dev_desc;
+    err = usb_host_get_device_descriptor(dev_info->dev_hdl, &dev_desc);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get device descriptor: %s", esp_err_to_name(err));
+        usb_host_device_close(client_hdl, dev_info->dev_hdl);
+        dev_info->dev_hdl = NULL;
+        return;
+    }
+    
+    // Enregistrer les informations VID/PID
+    dev_info->vid = dev_desc.idVendor;
+    dev_info->pid = dev_desc.idProduct;
+    
+    ESP_LOGI(TAG, "USB Device connected: VID:0x%04X, PID:0x%04X", 
+             dev_info->vid, dev_info->pid);
+    
+    // Vérifier si c'est un périphérique audio
+    // Implémentez ici la logique pour vérifier si c'est un périphérique audio
+    // en inspectant les descripteurs d'interface
+}
+
+void HostBox3Component::process_device_disconnection() {
+    if (usb_device_info.dev_hdl) {
+        usb_host_device_close(client_hdl, usb_device_info.dev_hdl);
+        usb_device_info.dev_hdl = NULL;
+        ESP_LOGI(TAG, "USB device closed");
+        
+        // Réinitialiser l'état
+        usb_audio_initialized = false;
+    }
 }
 
 void HostBox3Component::usb_event_task(void *arg) {
-  HostBox3Component *self = static_cast<HostBox3Component *>(arg);
-
-  while (1) {
-    usb_host_client_handle_events(self->client_hdl, portMAX_DELAY);
-
-    // Traitez les événements USB ici
-    vTaskDelay(pdMS_TO_TICKS(100));
-  }
+    HostBox3Component *self = static_cast<HostBox3Component *>(arg);
+    
+    ESP_LOGI(TAG, "USB Event Task started");
+    
+    while (1) {
+        // Traiter les événements USB client
+        usb_host_client_handle_events(self->client_hdl, portMAX_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
 }
 
 }  // namespace host_box3

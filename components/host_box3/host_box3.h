@@ -8,7 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "usb/usb_host.h"
-#include <esp_uac/uac_host.h>
+
 #include "usb/usb_phy.h"
 
 namespace esphome {

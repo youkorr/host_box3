@@ -5,7 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
-#include "usb_device_uac.h"
+
 
 namespace esphome {
 namespace host_box3 {

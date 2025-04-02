@@ -36,10 +36,10 @@ void HostBox3Component::init_usb_audio() {
       .otg_mode = USB_OTG_MODE_HOST,
       .target = USB_PHY_TARGET_INT,
       .gpio_conf = {
-          .d_n = 19,  // GPIO19 for D-
-          .d_p = 20,  // GPIO20 for D+
-          .vp = -1,
-          .vm = -1,
+          .vp = -1,  // Non utilisé
+          .vm = -1,  // Non utilisé
+          .d_n = 19, // GPIO19 pour D-
+          .d_p = 20, // GPIO20 pour D+
       },
   };
 
@@ -62,20 +62,17 @@ void HostBox3Component::init_usb_audio() {
 }
 
 bool HostBox3Component::route_audio_to_usb() {
-  // Implement audio routing logic here
-  return true;  // Placeholder implementation
+  // Implémentez la logique de routage audio ici
+  return true;  // Placeholder
 }
 
 void HostBox3Component::usb_event_task(void *arg) {
   HostBox3Component *self = static_cast<HostBox3Component *>(arg);
-  usb_device_info_t dev_info;
 
   while (1) {
-    if (usb_host_get_device_info(self->client_hdl, &dev_info) == ESP_OK) {
-      if (dev_info.connected && dev_info.class_type == USB_CLASS_AUDIO) {
-        ESP_LOGI(TAG, "USB Audio device connected");
-      }
-    }
+    usb_host_client_handle_events(self->client_hdl, portMAX_DELAY);
+
+    // Traitez les événements USB ici
     vTaskDelay(pdMS_TO_TICKS(100));
   }
 }

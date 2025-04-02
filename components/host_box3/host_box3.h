@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "usb/usb_host.h"
-#include "usb/usb_phy.h"  // Pour usb_phy_config_t et autres
+#include "usb/usb_phy.h"  // Pour usb_phy_config_t
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -21,7 +21,7 @@ class HostBox3Component : public Component {
 
  private:
   usb_host_client_handle_t client_hdl = nullptr;
-  usb_phy_handle_t phy_hdl = nullptr;  // Handle pour le PHY USB
+  usb_phy_handle_t phy_hdl = nullptr;
   bool usb_audio_initialized = false;
   TaskHandle_t usb_task_handle = nullptr;
 

@@ -7,11 +7,10 @@ namespace esphome {
 namespace host_box3 {
 
 HostBox3Component::HostBox3Component()
-    : client_hdl(nullptr), phy_hdl(nullptr), usb_audio_initialized(false) {}
+    : client_hdl(nullptr), usb_audio_initialized(false) {}
 
 HostBox3Component::~HostBox3Component() {
   if (client_hdl) usb_host_client_deregister(client_hdl);
-  if (phy_hdl) usb_del_phy(phy_hdl);
   usb_host_uninstall();
   if (usb_task_handle) vTaskDelete(usb_task_handle);
 }
@@ -31,24 +30,14 @@ void HostBox3Component::loop() {
 }
 
 void HostBox3Component::init_usb_audio() {
-  const usb_phy_config_t phy_config = {
-    .target = USB_PHY_TARGET_INT,
-    .controller = USB_PHY_CTRL_OTG,
-    .otg_mode = USB_OTG_MODE_HOST
-};
-
-
-
-
-
-
-  ESP_ERROR_CHECK(usb_new_phy(&phy_config, &phy_hdl));
+  ESP_LOGI(TAG, "Initializing USB Host...");
 
   const usb_host_config_t host_config = {
       .skip_phy_setup = false,
       .intr_flags = ESP_INTR_FLAG_LEVEL3,
   };
 
+  // Initialisation du contrôleur USB Host
   ESP_ERROR_CHECK(usb_host_install(&host_config));
 
   const usb_host_client_config_t client_config = {
@@ -78,5 +67,6 @@ void HostBox3Component::usb_event_task(void *arg) {
 
 }  // namespace host_box3
 }  // namespace esphome
+
 
 

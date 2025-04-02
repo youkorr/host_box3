@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "esp_err.h"
 #include "usb/usb_host.h"
+#include "usb_device_uac.h"
 #include "driver/gpio.h"
 #include "freertos/queue.h"
 

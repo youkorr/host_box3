@@ -6,7 +6,31 @@ static const char *TAG = "host_box3";
 namespace esphome {
 namespace host_box3 {
 
-HostBox3Component::HostBox3Component() {}
+HostBox3Component::HostBox3Component() : client_hdl(NULL), uac_handle(NULL), phy_hdl(NULL), usb_audio_initialized(false) {}
+
+HostBox3Component::~HostBox3Component() {
+  // Libérer les ressources USB si nécessaire
+  if (uac_handle != NULL) {
+    uac_host_uninstall(uac_handle);
+  }
+  
+  if (client_hdl != NULL) {
+    usb_host_client_deregister(client_hdl);
+  }
+  
+  // Désinstaller l'hôte USB
+  usb_host_uninstall();
+  
+  // Libérer l'interface physique USB
+  if (phy_hdl != NULL) {
+    usb_del_phy(phy_hdl);
+  }
+  
+  // Supprimer la tâche d'événements USB si elle existe
+  if (usb_task_handle != NULL) {
+    vTaskDelete(usb_task_handle);
+  }
+}
 
 void HostBox3Component::setup() {
   ESP_LOGCONFIG(TAG, "Setting up ESP32-S3-BOX3 USB Audio Host...");
@@ -32,13 +56,33 @@ void HostBox3Component::dump_config() {
 void HostBox3Component::init_usb_audio() {
   ESP_LOGI(TAG, "Initializing USB Host for Audio...");
   
+  // Configuration des broches USB (GPIO2 pour D+ et GPIO6 pour D-)
+  const usb_phy_config_t phy_config = {
+    .controller = USB_PHY_CTRL_OTG,
+    .otg_mode = USB_OTG_MODE_HOST,
+    .target = USB_PHY_TARGET_INT,
+    .gpio_conf = {
+      .d_n = 6,  // GPIO6 pour D-
+      .d_p = 2,  // GPIO2 pour D+
+      .vp = -1,
+      .vm = -1,
+    }
+  };
+  
+  // Initialiser l'interface physique USB
+  esp_err_t err = usb_new_phy(&phy_config, &phy_hdl);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "USB PHY initialization failed: %s", esp_err_to_name(err));
+    return;
+  }
+  
   // Configuration USB Host
   usb_host_config_t host_config = {
     .intr_flags = ESP_INTR_FLAG_LEVEL1,
   };
   
   // Initialisation du host USB
-  esp_err_t err = usb_host_install(&host_config);
+  err = usb_host_install(&host_config);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "USB Host installation failed: %s", esp_err_to_name(err));
     return;

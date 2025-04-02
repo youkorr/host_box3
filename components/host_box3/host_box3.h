@@ -1,8 +1,7 @@
 #pragma once
 
 #include "esphome/core/component.h"
-#include "usb/usb_host.h"
-#include "usb/usb_common.h"
+#include "usb/usb_host.h"  // Updated header
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 

@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "usb/usb_host.h"
 #include "usb/uac_host.h"
+#include "usb/usb_phy.h"
 
 namespace esphome {
 namespace host_box3 {
@@ -16,6 +17,7 @@ namespace host_box3 {
 class HostBox3Component : public Component {
  public:
   HostBox3Component();
+  ~HostBox3Component();
   
   void setup() override;
   void loop() override;
@@ -30,6 +32,7 @@ class HostBox3Component : public Component {
   // Variables pour gérer l'audio USB
   usb_host_client_handle_t client_hdl;
   uac_host_handle_t uac_handle;
+  usb_phy_handle_t phy_hdl;  // Gestionnaire de l'interface physique USB
   bool usb_audio_initialized = false;
   
   // Tâche pour gérer les événements USB

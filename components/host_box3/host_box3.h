@@ -2,6 +2,9 @@
 
 #include "esphome/core/component.h"
 #include "usb/usb_host.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
 
 namespace esphome {
 namespace host_box3 {

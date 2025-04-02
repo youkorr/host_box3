@@ -9,7 +9,7 @@
 #include "freertos/task.h"
 #include "usb/usb_host.h"
 
-#include "usb/usb_phy.h"
+
 
 namespace esphome {
 namespace host_box3 {

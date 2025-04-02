@@ -32,10 +32,11 @@ void HostBox3Component::loop() {
 
 void HostBox3Component::init_usb_audio() {
   const usb_phy_config_t phy_config = {
-    .target = USB_PHY_TARGET_INT,
-    .controller = USB_PHY_CTRL_OTG,
-    .otg_mode = USB_OTG_MODE_HOST
+    USB_PHY_TARGET_INT,  // target
+    USB_PHY_CTRL_OTG,    // controller
+    USB_OTG_MODE_HOST    // otg_mode
 };
+
 
 
 

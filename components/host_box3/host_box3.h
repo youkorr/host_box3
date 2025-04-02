@@ -8,6 +8,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "usb/usb_host.h"
+#include "usb/uac_host.h"
+#include "usb/usb_phy.h"
+
 
 
 

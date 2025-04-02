@@ -32,16 +32,12 @@ void HostBox3Component::loop() {
 
 void HostBox3Component::init_usb_audio() {
   const usb_phy_config_t phy_config = {
-      .controller = USB_PHY_CTRL_OTG,
-      .otg_mode = USB_OTG_MODE_HOST,
-      .target = USB_PHY_TARGET_INT,
-      .gpio_conf = {
-          .vp = -1,  // Non utilisé
-          .vm = -1,  // Non utilisé
-          .d_n = 19, // GPIO19 pour D-
-          .d_p = 20, // GPIO20 pour D+
-      },
-  };
+    .controller = USB_PHY_CTRL_OTG,
+    .otg_mode = USB_OTG_MODE_HOST,
+    .target = USB_PHY_TARGET_INT
+    // ⚠️ Plus besoin de gpio_conf
+};
+
 
   ESP_ERROR_CHECK(usb_new_phy(&phy_config, &phy_hdl));
 

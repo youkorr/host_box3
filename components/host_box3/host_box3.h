@@ -2,7 +2,8 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/media_player/media_player.h"
-#include "esphome/components/usb/usb_host.h"
+#include "usb/usb_host.h"
+
 
 namespace esphome {
 namespace host_box3 {

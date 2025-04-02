@@ -12,20 +12,6 @@ static const char *TAG = "host_box3";
 namespace esphome {
 namespace host_box3 {
 
-// Définition des événements USB
-enum {
-    USB_AUDIO_DEVICE_CONNECTED,
-    USB_AUDIO_DEVICE_DISCONNECTED,
-    USB_AUDIO_STREAM_STARTED,
-    USB_AUDIO_STREAM_STOPPED,
-};
-
-// Événement de file d'attente USB
-typedef struct {
-    int event_id;
-    void *data;
-} usb_audio_event_t;
-
 // Structure pour stocker les informations des périphériques USB
 typedef struct {
     uint8_t dev_addr;
@@ -141,16 +127,17 @@ void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t 
     HostBox3Component *self = static_cast<HostBox3Component *>(arg);
     
     switch (event_msg->event) {
-        case USB_HOST_CLIENT_EVENT_NEW_DEV:
+        case USB_HOST_CLIENT_EVENT_NEW_DEV: {
             ESP_LOGI(TAG, "New USB device connected");
             usb_audio_event_t evt = {
                 .event_id = USB_AUDIO_DEVICE_CONNECTED,
-                .data = (void *)event_msg->new_dev.address
+                .data = (void *)(uintptr_t)event_msg->new_dev.address
             };
             xQueueSend(usb_event_queue, &evt, portMAX_DELAY);
             break;
+        }
             
-        case USB_HOST_CLIENT_EVENT_DEV_GONE:
+        case USB_HOST_CLIENT_EVENT_DEV_GONE: {
             ESP_LOGI(TAG, "USB device disconnected");
             usb_audio_event_t evt = {
                 .event_id = USB_AUDIO_DEVICE_DISCONNECTED,
@@ -158,6 +145,7 @@ void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t 
             };
             xQueueSend(usb_event_queue, &evt, portMAX_DELAY);
             break;
+        }
             
         default:
             break;
@@ -165,25 +153,31 @@ void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t 
 }
 
 void HostBox3Component::process_usb_event(usb_audio_event_t *event) {
+    uint8_t dev_addr;
+    
     switch (event->event_id) {
-        case USB_AUDIO_DEVICE_CONNECTED:
+        case USB_AUDIO_DEVICE_CONNECTED: {
             // Traiter la connexion d'un périphérique USB
-            uint8_t dev_addr = (uint8_t)((uint32_t)event->data);
+            dev_addr = (uint8_t)((uintptr_t)event->data);
             process_device_connection(dev_addr);
             break;
+        }
             
-        case USB_AUDIO_DEVICE_DISCONNECTED:
+        case USB_AUDIO_DEVICE_DISCONNECTED: {
             // Traiter la déconnexion d'un périphérique USB
             process_device_disconnection();
             break;
+        }
             
-        case USB_AUDIO_STREAM_STARTED:
+        case USB_AUDIO_STREAM_STARTED: {
             ESP_LOGI(TAG, "USB Audio stream started");
             break;
+        }
             
-        case USB_AUDIO_STREAM_STOPPED:
+        case USB_AUDIO_STREAM_STOPPED: {
             ESP_LOGI(TAG, "USB Audio stream stopped");
             break;
+        }
             
         default:
             break;
@@ -204,7 +198,7 @@ void HostBox3Component::process_device_connection(uint8_t dev_addr) {
     usb_device_info_t *dev_info = &usb_device_info;
     dev_info->dev_addr = dev_addr;
     
-    usb_device_desc_t dev_desc;
+    const usb_device_desc_t *dev_desc;
     err = usb_host_get_device_descriptor(dev_info->dev_hdl, &dev_desc);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to get device descriptor: %s", esp_err_to_name(err));
@@ -214,8 +208,8 @@ void HostBox3Component::process_device_connection(uint8_t dev_addr) {
     }
     
     // Enregistrer les informations VID/PID
-    dev_info->vid = dev_desc.idVendor;
-    dev_info->pid = dev_desc.idProduct;
+    dev_info->vid = dev_desc->idVendor;
+    dev_info->pid = dev_desc->idProduct;
     
     ESP_LOGI(TAG, "USB Device connected: VID:0x%04X, PID:0x%04X", 
              dev_info->vid, dev_info->pid);
@@ -250,6 +244,5 @@ void HostBox3Component::usb_event_task(void *arg) {
 
 }  // namespace host_box3
 }  // namespace esphome
-
 
 

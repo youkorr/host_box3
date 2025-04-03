@@ -1,8 +1,12 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "freertos/queue.h"
 #include "usb/usb_host.h"
-
+#include <cstring>
 
 namespace esphome {
 namespace host_box3 {
@@ -58,6 +62,7 @@ private:
 
 }  // namespace host_box3
 }  // namespace esphome
+
 
 
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "esphome/core/component.h"
-#include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/components/usb_host/usb_host_text_sensor.h"
 #include "usb/usb_host.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -10,7 +10,6 @@
 namespace esphome {
 namespace host_box3 {
 
-// Définition des événements USB audio
 typedef enum {
     USB_AUDIO_DEVICE_CONNECTED,
     USB_AUDIO_DEVICE_DISCONNECTED,
@@ -18,7 +17,6 @@ typedef enum {
     USB_AUDIO_STREAM_STOPPED
 } usb_audio_event_id_t;
 
-// Structure des événements USB audio
 typedef struct {
     usb_audio_event_id_t event_id;
     void *data;
@@ -33,7 +31,8 @@ public:
     void loop() override;
     void dump_config() override;
 
-    void update_usb_status(const std::string &status);  // Met à jour le text_sensor
+    void set_usb_status_sensor(usb_host::USBHostTextSensor *sensor) { this->usb_status_sensor_ = sensor; }
+    void update_usb_status(const std::string &status);  
 
 protected:
     usb_host_client_handle_t client_hdl;
@@ -49,11 +48,12 @@ protected:
     static void client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg);
     static void usb_event_task(void *arg);
 
-    text_sensor::TextSensor *usb_status_sensor_; // Capteur texte pour le statut USB
+    usb_host::USBHostTextSensor *usb_status_sensor_{nullptr}; // Capteur texte
 };
 
 }  // namespace host_box3
 }  // namespace esphome
+
 
 
 

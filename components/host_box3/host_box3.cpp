@@ -328,42 +328,109 @@ void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t 
 void HostBox3Component::configure_audio_device(usb_device_handle_t dev_hdl) {
     ESP_LOGI(TAG, "Configuring USB Audio device...");
     
-    // Pour ESP-IDF 5.1.5, nous pouvons utiliser le transfert de contrôle standard
+    // Utiliser un transfert de contrôle pour configurer le périphérique
     
-    // Définir la configuration active (normalement configuration #1)
-    // La fonction usb_host_set_configuration() n'existe pas directement dans ESP-IDF 5.1.5
-    // Utilisons donc un transfert de contrôle standard
-    
-    usb_setup_packet_t setup_pkt;
-    setup_pkt.bmRequestType = USB_BM_REQUEST_TYPE_DIR_OUT | 
-                              USB_BM_REQUEST_TYPE_TYPE_STANDARD |
-                              USB_BM_REQUEST_TYPE_RECIP_DEVICE;
-    setup_pkt.bRequest = USB_B_REQUEST_SET_CONFIGURATION;
-    setup_pkt.wValue = 1;  // Configuration value = 1
-    setup_pkt.wIndex = 0;
-    setup_pkt.wLength = 0;
-    
-    // Exécuter le transfert de contrôle
-    esp_err_t err = usb_host_control_transfer(this->client_hdl, dev_hdl, &setup_pkt, NULL, 1000);
+    // Allouer un transfert de contrôle
+    usb_transfer_t *ctrl_xfer;
+    esp_err_t err = usb_host_transfer_alloc(64, 0, &ctrl_xfer);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set configuration: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to allocate control transfer: %s", esp_err_to_name(err));
         return;
     }
     
-    // Définir l'alternate setting pour l'interface
-    setup_pkt.bmRequestType = USB_BM_REQUEST_TYPE_DIR_OUT | 
-                              USB_BM_REQUEST_TYPE_TYPE_STANDARD |
-                              USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
-    setup_pkt.bRequest = USB_B_REQUEST_SET_INTERFACE;
-    setup_pkt.wValue = this->usb_alt_setting;
-    setup_pkt.wIndex = this->usb_interface_num;
-    setup_pkt.wLength = 0;
+    // Configurer le transfert de contrôle pour SET_CONFIGURATION (1)
+    ctrl_xfer->device_handle = dev_hdl;
+    ctrl_xfer->bEndpointAddress = 0x00;  // Endpoint de contrôle (EP0)
+    ctrl_xfer->callback = NULL;
+    ctrl_xfer->context = NULL;
+    ctrl_xfer->timeout_ms = 1000;
+    ctrl_xfer->num_bytes = 8;  // Taille standard d'un paquet de setup
     
-    err = usb_host_control_transfer(this->client_hdl, dev_hdl, &setup_pkt, NULL, 1000);
+    // Setup packet pour SET_CONFIGURATION
+    uint8_t bmRequestType = USB_BM_REQUEST_TYPE_DIR_OUT | 
+                            USB_BM_REQUEST_TYPE_TYPE_STANDARD |
+                            USB_BM_REQUEST_TYPE_RECIP_DEVICE;
+                            
+    ctrl_xfer->data_buffer[0] = bmRequestType;
+    ctrl_xfer->data_buffer[1] = USB_B_REQUEST_SET_CONFIGURATION;  // bRequest
+    ctrl_xfer->data_buffer[2] = 1;   // wValue LSB (Configuration value = 1)
+    ctrl_xfer->data_buffer[3] = 0;   // wValue MSB
+    ctrl_xfer->data_buffer[4] = 0;   // wIndex LSB
+    ctrl_xfer->data_buffer[5] = 0;   // wIndex MSB
+    ctrl_xfer->data_buffer[6] = 0;   // wLength LSB
+    ctrl_xfer->data_buffer[7] = 0;   // wLength MSB
+    
+    // Soumettre le transfert
+    err = usb_host_transfer_submit_control(this->client_hdl, ctrl_xfer);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set interface alternate setting: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to submit SET_CONFIGURATION control transfer: %s", esp_err_to_name(err));
+        usb_host_transfer_free(ctrl_xfer);
         return;
     }
+    
+    // Attendre que le transfert soit terminé
+    bool transfer_completed = false;
+    for (int i = 0; i < 10; i++) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        if (ctrl_xfer->status != 0) {  // Status 0 généralement indique "en cours"
+            transfer_completed = true;
+            break;
+        }
+    }
+    
+    if (!transfer_completed || ctrl_xfer->status != USB_TRANSFER_STATUS_COMPLETED) {
+        ESP_LOGE(TAG, "SET_CONFIGURATION transfer failed or timed out: %d", ctrl_xfer->status);
+        usb_host_transfer_free(ctrl_xfer);
+        return;
+    }
+    
+    // Maintenant, configurer l'alternate setting pour l'interface audio
+    // Réutiliser le même transfert de contrôle
+    
+    // Setup packet pour SET_INTERFACE
+    bmRequestType = USB_BM_REQUEST_TYPE_DIR_OUT | 
+                    USB_BM_REQUEST_TYPE_TYPE_STANDARD |
+                    USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
+                    
+    ctrl_xfer->data_buffer[0] = bmRequestType;
+    ctrl_xfer->data_buffer[1] = USB_B_REQUEST_SET_INTERFACE;  // bRequest
+    ctrl_xfer->data_buffer[2] = this->usb_alt_setting;   // wValue LSB (Alternate Setting)
+    ctrl_xfer->data_buffer[3] = 0;   // wValue MSB
+    ctrl_xfer->data_buffer[4] = this->usb_interface_num;  // wIndex LSB (Interface Number)
+    ctrl_xfer->data_buffer[5] = 0;   // wIndex MSB
+    ctrl_xfer->data_buffer[6] = 0;   // wLength LSB
+    ctrl_xfer->data_buffer[7] = 0;   // wLength MSB
+    
+    // Reset du statut du transfert
+    ctrl_xfer->status = 0;
+    ctrl_xfer->actual_num_bytes = 0;
+    
+    // Soumettre le transfert
+    err = usb_host_transfer_submit_control(this->client_hdl, ctrl_xfer);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to submit SET_INTERFACE control transfer: %s", esp_err_to_name(err));
+        usb_host_transfer_free(ctrl_xfer);
+        return;
+    }
+    
+    // Attendre que le transfert soit terminé
+    transfer_completed = false;
+    for (int i = 0; i < 10; i++) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        if (ctrl_xfer->status != 0) {
+            transfer_completed = true;
+            break;
+        }
+    }
+    
+    if (!transfer_completed || ctrl_xfer->status != USB_TRANSFER_STATUS_COMPLETED) {
+        ESP_LOGE(TAG, "SET_INTERFACE transfer failed or timed out: %d", ctrl_xfer->status);
+        usb_host_transfer_free(ctrl_xfer);
+        return;
+    }
+    
+    // Libérer le transfert de contrôle
+    usb_host_transfer_free(ctrl_xfer);
     
     // Réclamer l'interface audio
     err = usb_host_interface_claim(this->client_hdl, dev_hdl, this->usb_interface_num, this->usb_alt_setting);
@@ -389,7 +456,6 @@ void HostBox3Component::configure_audio_device(usb_device_handle_t dev_hdl) {
     ESP_LOGI(TAG, "USB Audio device configured successfully");
     ESP_LOGI(TAG, "Ready to stream audio to USB endpoint 0x%02x", this->usb_endpoint_addr);
 }
-
 void HostBox3Component::i2s_audio_callback(void *arg, void *data, size_t size) {
     HostBox3Component *self = static_cast<HostBox3Component*>(arg);
     

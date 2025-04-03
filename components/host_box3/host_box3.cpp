@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
+#include <cstring>
 
 namespace esphome {
 namespace host_box3 {

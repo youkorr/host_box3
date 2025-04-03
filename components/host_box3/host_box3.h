@@ -9,7 +9,7 @@
 namespace esphome {
 namespace host_box3 {
 
-// Définir les types d'événements USB audio
+// Définition des événements USB audio
 typedef enum {
     USB_AUDIO_DEVICE_CONNECTED,
     USB_AUDIO_DEVICE_DISCONNECTED,
@@ -31,27 +31,27 @@ public:
     void setup() override;
     void loop() override;
     void dump_config() override;
-    
+
 private:
     usb_host_client_handle_t client_hdl;
     bool usb_audio_initialized;
     TaskHandle_t usb_task_handle;
-    
-    // Déclaration des fonctions manquantes
+    QueueHandle_t event_queue;
+
+    void setup_gpio_for_usb();
     void init_usb_audio();
-    bool route_audio_to_usb();  // Fonction qui gère le routage audio vers USB
-    void process_usb_event(usb_audio_event_t *event);  // Fonction qui traite les événements USB
-    
+    bool route_audio_to_usb();
+    void process_usb_event(usb_audio_event_t *event);
     void process_device_connection(uint8_t dev_addr);
     void process_device_disconnection();
-    
-    // Déclaration des fonctions statiques nécessaires pour les callbacks
+
     static void client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg);
     static void usb_event_task(void *arg);
 };
 
 }  // namespace host_box3
 }  // namespace esphome
+
 
 
 

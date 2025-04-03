@@ -329,48 +329,20 @@ void HostBox3Component::send_audio_to_usb(uint8_t *data, size_t size) {
     
     // S'assurer que la taille ne dépasse pas la capacité du buffer
     size_t copy_size = (size > this->audio_buffer.buffer_size) ? this->audio_buffer.buffer_size : size;
-    
-    // Copier les données dans le buffer
     memcpy(this->audio_buffer.buffer, data, copy_size);
     
-    // Vérifier si le transfert USB est disponible
-    if (!this->audio_transfer || this->audio_dev_addr == 0 || this->usb_endpoint_addr == 0) {
-        xSemaphoreGive(this->audio_buffer.buffer_semaphore);
-        return;
-    }
+    // Ajouter les données à la queue
+    xQueueSend(this->audio_buffer.data_queue, &copy_size, portMAX_DELAY);
     
-    // Configurer le transfert USB
-    this->audio_transfer->data_buffer = this->audio_buffer.buffer;
-    this->audio_transfer->num_bytes = copy_size;
+    // Relâcher le sémaphore du buffer
+    xSemaphoreGive(this->audio_buffer.buffer_semaphore);
     
-    // Soumettre le transfert USB
-    esp_err_t err = usb_host_transfer_submit(this->audio_transfer);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to submit USB transfer: %s", esp_err_to_name(err));
-        xSemaphoreGive(this->audio_buffer.buffer_semaphore);
-    }
-    // Le sémaphore sera rendu dans le callback de transfert
-}
-
-void HostBox3Component::usb_transfer_callback(usb_transfer_t *transfer) {
-    HostBox3Component *self = static_cast<HostBox3Component*>(transfer->context);
-    
-    // Libérer le buffer pour le prochain transfert
-    xSemaphoreGive(self->audio_buffer.buffer_semaphore);
-    
-    // Vérifier le statut du transfert
-    if (transfer->status != USB_TRANSFER_STATUS_COMPLETED) {
-        ESP_LOGW(TAG, "USB transfer error: %d", transfer->status);
-        return;
-    }
-    
-    // Ajouter à la queue pour traitement ultérieur si nécessaire
-    size_t size = transfer->actual_num_bytes;
-    xQueueSend(self->audio_buffer.data_queue, &size, 0);
+    ESP_LOGI(TAG, "Audio data sent to USB (size: %d bytes)", size);
 }
 
 }  // namespace host_box3
 }  // namespace esphome
+
 
 
 

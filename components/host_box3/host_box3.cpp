@@ -43,6 +43,19 @@ static const gpio_num_t USB_DM_PIN = GPIO_NUM_19;  // D-
 // Défini comme l'opposé de EP_DIR_OUT (0x00)
 #define USB_B_ENDPOINT_ADDRESS_EP_DIR_IN  0x80
 
+// États de transferts USB
+enum {
+    USB_TRANSFER_STATUS_COMPLETED,
+    USB_TRANSFER_STATUS_ERROR,
+    USB_TRANSFER_STATUS_TIMED_OUT,
+    USB_TRANSFER_STATUS_CANCELED,
+    USB_TRANSFER_STATUS_STALL,
+    USB_TRANSFER_STATUS_NO_DEVICE,
+    USB_TRANSFER_STATUS_OVERFLOW,
+    // Define our own PENDING status since it might not exist in your environment
+    USB_TRANSFER_STATUS_OUR_PENDING = 0xFF
+};
+
 HostBox3Component::HostBox3Component() 
     : usb_audio_initialized(false), 
       usb_task_handle(nullptr), 
@@ -214,84 +227,219 @@ void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t 
             
             ESP_LOGI(TAG, "USB device connected");
             
-            // Utiliser la fonction usb_host_device_info pour obtenir les descripteurs
-            usb_device_info_t dev_info;
-            err = usb_host_device_info(dev_hdl, &dev_info);
+            // Pour identifier le périphérique audio, nous allons utiliser une approche simplifiée
+            bool is_audio_device = false;
+            uint8_t interface_num = 0;
+            uint8_t alt_setting = 0;
+            uint8_t endpoint_addr = 0;
+            
+            // Nous allons utiliser le contrôle de transfert pour obtenir des informations sur les interfaces
+            // et endpoints disponibles
+            
+            // 1. Obtenir le descripteur de périphérique
+            uint8_t dev_desc_data[18];  // Taille standard pour le descripteur de périphérique
+            
+            usb_transfer_t *ctrl_xfer_dev_desc;
+            err = usb_host_transfer_alloc(64, 0, &ctrl_xfer_dev_desc);
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to get device info: %s", esp_err_to_name(err));
+                ESP_LOGE(TAG, "Failed to allocate control transfer: %s", esp_err_to_name(err));
                 usb_host_device_close(this->client_hdl, dev_hdl);
                 return;
             }
             
-            bool is_audio_device = false;
+            // Configurer le transfert pour GET_DESCRIPTOR (Device)
+            ctrl_xfer_dev_desc->device_handle = dev_hdl;
+            ctrl_xfer_dev_desc->bEndpointAddress = 0x00;  // Endpoint 0
+            ctrl_xfer_dev_desc->callback = NULL;
+            ctrl_xfer_dev_desc->context = NULL;
+            ctrl_xfer_dev_desc->timeout_ms = 1000;
+            ctrl_xfer_dev_desc->num_bytes = 8;  // Setup packet size
             
-            // Vérifier si c'est un périphérique audio
-            if (dev_info.desc.bDeviceClass == USB_CLASS_PER_INTERFACE ||
-                dev_info.desc.bDeviceClass == USB_CLASS_AUDIO) {
+            // Setup packet for GET_DESCRIPTOR (Device)
+            ctrl_xfer_dev_desc->data_buffer[0] = 0x80;  // bmRequestType (Device to Host, Standard, Device)
+            ctrl_xfer_dev_desc->data_buffer[1] = 0x06;  // bRequest (GET_DESCRIPTOR)
+            ctrl_xfer_dev_desc->data_buffer[2] = 0x01;  // wValue LSB (Descriptor Type = Device)
+            ctrl_xfer_dev_desc->data_buffer[3] = 0x00;  // wValue MSB
+            ctrl_xfer_dev_desc->data_buffer[4] = 0x00;  // wIndex LSB
+            ctrl_xfer_dev_desc->data_buffer[5] = 0x00;  // wIndex MSB
+            ctrl_xfer_dev_desc->data_buffer[6] = sizeof(dev_desc_data);  // wLength LSB
+            ctrl_xfer_dev_desc->data_buffer[7] = 0x00;   // wLength MSB
+            
+            // Soumettre le transfert
+            err = usb_host_transfer_submit_control(this->client_hdl, ctrl_xfer_dev_desc);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to submit control transfer: %s", esp_err_to_name(err));
+                usb_host_transfer_free(ctrl_xfer_dev_desc);
+                usb_host_device_close(this->client_hdl, dev_hdl);
+                return;
+            }
+            
+            // Attendre la fin du transfert (simple polling)
+            esp_err_t transfer_result = ESP_ERR_TIMEOUT;
+            for (int retry = 0; retry < 10; retry++) {
+                vTaskDelay(pdMS_TO_TICKS(50));
                 
-                // Obtenir tous les descripteurs de configuration
-                const usb_config_desc_t *config_desc = &dev_info.config_desc;
+                if (ctrl_xfer_dev_desc->status != 0) {  // Assuming 0 means pending in your environment
+                    transfer_result = ESP_OK;
+                    break;
+                }
+            }
+            
+            // Vérifier si le transfert est terminé avec succès
+            if (transfer_result != ESP_OK || ctrl_xfer_dev_desc->status != USB_TRANSFER_STATUS_COMPLETED) {
+                ESP_LOGE(TAG, "Control transfer failed or timed out: %d", 
+                        transfer_result == ESP_OK ? ctrl_xfer_dev_desc->status : -1);
+                usb_host_transfer_free(ctrl_xfer_dev_desc);
+                usb_host_device_close(this->client_hdl, dev_hdl);
+                return;
+            }
+            
+            // Copier les données reçues
+            memcpy(dev_desc_data, ctrl_xfer_dev_desc->data_buffer, sizeof(dev_desc_data));
+            usb_host_transfer_free(ctrl_xfer_dev_desc);
+            
+            // Extraire les informations pertinentes du descripteur de périphérique
+            uint8_t device_class = dev_desc_data[4];  // bDeviceClass
+            
+            ESP_LOGI(TAG, "USB Device Class: 0x%02x", device_class);
+            
+            // Si c'est un périphérique audio ou un périphérique par interface,
+            // on cherche les interfaces audio
+            if (device_class == USB_CLASS_PER_INTERFACE || device_class == USB_CLASS_AUDIO) {
+                // 2. Obtenir le descripteur de configuration
+                uint8_t config_desc_data[256];  // Buffer pour le descripteur de configuration
                 
-                // Parcourir toutes les interfaces
-                int offset = config_desc->bLength;
-                const uint8_t *ptr = (const uint8_t *)config_desc + offset;
-                const uint8_t *end = (const uint8_t *)config_desc + config_desc->wTotalLength;
+                usb_transfer_t *ctrl_xfer_config;
+                err = usb_host_transfer_alloc(64, 0, &ctrl_xfer_config);
+                if (err != ESP_OK) {
+                    ESP_LOGE(TAG, "Failed to allocate control transfer: %s", esp_err_to_name(err));
+                    usb_host_device_close(this->client_hdl, dev_hdl);
+                    return;
+                }
                 
-                while (ptr < end) {
-                    const usb_standard_desc_t *desc = (const usb_standard_desc_t *)ptr;
+                // Configurer le transfert pour GET_DESCRIPTOR (Configuration)
+                ctrl_xfer_config->device_handle = dev_hdl;
+                ctrl_xfer_config->bEndpointAddress = 0x00;  // Endpoint 0
+                ctrl_xfer_config->callback = NULL;
+                ctrl_xfer_config->context = NULL;
+                ctrl_xfer_config->timeout_ms = 1000;
+                ctrl_xfer_config->num_bytes = 8;  // Setup packet size
+                
+                // Setup packet for GET_DESCRIPTOR (Configuration)
+                ctrl_xfer_config->data_buffer[0] = 0x80;  // bmRequestType (Device to Host, Standard, Device)
+                ctrl_xfer_config->data_buffer[1] = 0x06;  // bRequest (GET_DESCRIPTOR)
+                ctrl_xfer_config->data_buffer[2] = 0x02;  // wValue LSB (Descriptor Type = Configuration)
+                ctrl_xfer_config->data_buffer[3] = 0x00;  // wValue MSB
+                ctrl_xfer_config->data_buffer[4] = 0x00;  // wIndex LSB
+                ctrl_xfer_config->data_buffer[5] = 0x00;  // wIndex MSB
+                ctrl_xfer_config->data_buffer[6] = sizeof(config_desc_data);  // wLength LSB
+                ctrl_xfer_config->data_buffer[7] = 0x00;  // wLength MSB
+                
+                // Soumettre le transfert
+                err = usb_host_transfer_submit_control(this->client_hdl, ctrl_xfer_config);
+                if (err != ESP_OK) {
+                    ESP_LOGE(TAG, "Failed to submit control transfer: %s", esp_err_to_name(err));
+                    usb_host_transfer_free(ctrl_xfer_config);
+                    usb_host_device_close(this->client_hdl, dev_hdl);
+                    return;
+                }
+                
+                // Attendre la fin du transfert (simple polling)
+                transfer_result = ESP_ERR_TIMEOUT;
+                for (int retry = 0; retry < 10; retry++) {
+                    vTaskDelay(pdMS_TO_TICKS(50));
                     
-                    if (desc->bLength == 0 || ptr + desc->bLength > end) {
-                        // Protection contre les descripteurs invalides
+                    if (ctrl_xfer_config->status != 0) {  // Assuming 0 means pending
+                        transfer_result = ESP_OK;
                         break;
                     }
+                }
+                
+                // Vérifier si le transfert est terminé avec succès
+                if (transfer_result != ESP_OK || ctrl_xfer_config->status != USB_TRANSFER_STATUS_COMPLETED) {
+                    ESP_LOGE(TAG, "Control transfer failed or timed out: %d", 
+                            transfer_result == ESP_OK ? ctrl_xfer_config->status : -1);
+                    usb_host_transfer_free(ctrl_xfer_config);
+                    usb_host_device_close(this->client_hdl, dev_hdl);
+                    return;
+                }
+                
+                // Copier les données reçues
+                memcpy(config_desc_data, ctrl_xfer_config->data_buffer, sizeof(config_desc_data));
+                uint16_t total_length = config_desc_data[2] | (config_desc_data[3] << 8);  // wTotalLength
+                
+                usb_host_transfer_free(ctrl_xfer_config);
+                
+                // Analyser le descripteur de configuration pour trouver les interfaces audio
+                // et les endpoints isochrones OUT (pour la lecture)
+                
+                // Le descripteur de configuration commence à l'offset 0
+                // Les interfaces commencent après le descripteur de configuration
+                uint16_t offset = config_desc_data[0];  // bLength du descripteur de configuration
+                
+                while (offset < total_length) {
+                    uint8_t desc_length = config_desc_data[offset];
+                    uint8_t desc_type = config_desc_data[offset + 1];
                     
-                    if (desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
-                        const usb_intf_desc_t *intf = (const usb_intf_desc_t *)desc;
+                    // Si c'est un descripteur d'interface
+                    if (desc_type == 0x04) {  // Interface descriptor type
+                        uint8_t intf_num = config_desc_data[offset + 2];  // bInterfaceNumber
+                        uint8_t intf_alt = config_desc_data[offset + 3];  // bAlternateSetting
+                        uint8_t intf_class = config_desc_data[offset + 5];  // bInterfaceClass
+                        uint8_t intf_subclass = config_desc_data[offset + 6];  // bInterfaceSubClass
                         
-                        // Vérifier si c'est une interface audio streaming
-                        if (intf->bInterfaceClass == USB_CLASS_AUDIO && 
-                            intf->bInterfaceSubClass == USB_SUBCLASS_AUDIOSTREAMING) {
+                        // Si c'est une interface audio streaming
+                        if (intf_class == USB_CLASS_AUDIO && intf_subclass == USB_SUBCLASS_AUDIOSTREAMING) {
+                            ESP_LOGI(TAG, "Found Audio Streaming interface: %d, Alt: %d", intf_num, intf_alt);
                             
-                            ESP_LOGI(TAG, "Found Audio Streaming interface: %d, Alt: %d", 
-                                    intf->bInterfaceNumber, intf->bAlternateSetting);
-                            
-                            // Chercher les endpoints de cette interface
-                            const uint8_t *ep_ptr = ptr + intf->bLength;
-                            while (ep_ptr < end && ep_ptr < ptr + 128) { // Safety limit
-                                const usb_standard_desc_t *ep_desc = (const usb_standard_desc_t *)ep_ptr;
+                            // Chercher les endpoints dans cette interface
+                            uint16_t curr_offset = offset + desc_length;
+                            while (curr_offset < total_length) {
+                                uint8_t curr_desc_length = config_desc_data[curr_offset];
+                                uint8_t curr_desc_type = config_desc_data[curr_offset + 1];
                                 
-                                if (ep_desc->bLength == 0 || ep_ptr + ep_desc->bLength > end) {
-                                    break; // Protection contre les descripteurs invalides
+                                // Si nous trouvons une autre interface, sortir de la boucle
+                                if (curr_desc_type == 0x04) {
+                                    break;
                                 }
                                 
-                                if (ep_desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_ENDPOINT) {
-                                    const usb_ep_desc_t* ep = (const usb_ep_desc_t*)ep_desc;
+                                // Si c'est un descripteur d'endpoint
+                                if (curr_desc_type == 0x05) {  // Endpoint descriptor type
+                                    uint8_t ep_addr = config_desc_data[curr_offset + 2];  // bEndpointAddress
+                                    uint8_t ep_attr = config_desc_data[curr_offset + 3];  // bmAttributes
+                                    uint16_t ep_max_packet = config_desc_data[curr_offset + 4] | 
+                                                           (config_desc_data[curr_offset + 5] << 8);  // wMaxPacketSize
                                     
-                                    // Chercher un endpoint isochrone OUT
-                                    if ((ep->bmAttributes & USB_BM_ATTRIBUTES_XFERTYPE_MASK) == USB_BM_ATTRIBUTES_XFER_ISOC &&
-                                        (ep->bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK) == USB_B_ENDPOINT_ADDRESS_EP_DIR_OUT) {
+                                    // Si c'est un endpoint isochrone OUT
+                                    if ((ep_attr & 0x03) == 0x01 &&  // Isochrone
+                                        (ep_addr & 0x80) == 0x00) {  // OUT
                                         
-                                        ESP_LOGI(TAG, "Found Audio OUT endpoint: 0x%02x, Max Packet: %d",
-                                                ep->bEndpointAddress, ep->wMaxPacketSize);
+                                        ESP_LOGI(TAG, "Found Audio OUT endpoint: 0x%02x, Max Packet: %d", 
+                                                ep_addr, ep_max_packet);
                                         
-                                        this->usb_endpoint_addr = ep->bEndpointAddress;
-                                        this->usb_interface_num = intf->bInterfaceNumber;
-                                        this->usb_alt_setting = intf->bAlternateSetting;
+                                        // Sauvegarder les informations de l'interface et de l'endpoint
+                                        interface_num = intf_num;
+                                        alt_setting = intf_alt;
+                                        endpoint_addr = ep_addr;
                                         is_audio_device = true;
                                     }
                                 }
                                 
-                                ep_ptr += ep_desc->bLength;
+                                curr_offset += curr_desc_length;
                             }
                         }
                     }
-                    ptr += desc->bLength;
+                    
+                    offset += desc_length;
                 }
             }
             
             if (is_audio_device) {
                 ESP_LOGI(TAG, "USB Audio device found!");
                 this->audio_dev_handle = dev_hdl;
+                this->usb_interface_num = interface_num;
+                this->usb_alt_setting = alt_setting;
+                this->usb_endpoint_addr = endpoint_addr;
                 configure_audio_device(dev_hdl);
             } else {
                 // Not an audio device, close it
@@ -369,13 +517,21 @@ void HostBox3Component::configure_audio_device(usb_device_handle_t dev_hdl) {
         return;
     }
     
-    // Attendre la fin du transfert
-    while (ctrl_xfer->status == USB_TRANSFER_STATUS_PENDING) {
-        vTaskDelay(pdMS_TO_TICKS(10));
+    // Attendre la fin du transfert (simple polling)
+    esp_err_t transfer_result = ESP_ERR_TIMEOUT;
+    for (int retry = 0; retry < 10; retry++) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        
+        if (ctrl_xfer->status != 0) {  // Assuming 0 means pending in your environment
+            transfer_result = ESP_OK;
+            break;
+        }
     }
     
-    if (ctrl_xfer->status != USB_TRANSFER_STATUS_COMPLETED) {
-        ESP_LOGE(TAG, "Control transfer failed: %d", ctrl_xfer->status);
+    // Vérifier si le transfert est terminé avec succès
+    if (transfer_result != ESP_OK || ctrl_xfer->status != USB_TRANSFER_STATUS_COMPLETED) {
+        ESP_LOGE(TAG, "Control transfer failed or timed out: %d", 
+                transfer_result == ESP_OK ? ctrl_xfer->status : -1);
         usb_host_transfer_free(ctrl_xfer);
         return;
     }
@@ -477,6 +633,7 @@ void HostBox3Component::usb_transfer_callback(usb_transfer_t *transfer) {
 
 }  // namespace host_box3
 }  // namespace esphome
+
 
 
 

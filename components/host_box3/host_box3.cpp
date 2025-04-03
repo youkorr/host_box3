@@ -6,7 +6,7 @@ namespace host_box3 {
 
 static const char *TAG = "host_box3";
 
-HostBox3Component::HostBox3Component() : usb_audio_initialized(false), usb_status_sensor_(nullptr) {}
+HostBox3Component::HostBox3Component() : usb_audio_initialized(false) {}
 
 HostBox3Component::~HostBox3Component() {
     if (usb_task_handle) {
@@ -16,20 +16,16 @@ HostBox3Component::~HostBox3Component() {
 
 void HostBox3Component::setup() {
     ESP_LOGI(TAG, "Configuration du périphérique USB Host");
-    
-    // Initialisation des broches D+ (GPIO2) et D- (GPIO6) en mode flottant
+
     gpio_set_direction(GPIO_NUM_19, GPIO_MODE_INPUT);
     gpio_set_pull_mode(GPIO_NUM_19, GPIO_FLOATING);
     gpio_set_direction(GPIO_NUM_20, GPIO_MODE_INPUT);
     gpio_set_pull_mode(GPIO_NUM_20, GPIO_FLOATING);
 
-    // Initialisation de l'USB audio
     this->init_usb_audio();
 
-    // Création du capteur de texte si défini
-    if (usb_status_sensor_) {
-        usb_status_sensor_->publish_state("USB en attente...");
-    }
+    // Initialisation du capteur texte
+    this->update_usb_status("USB en attente...");
 }
 
 void HostBox3Component::loop() {
@@ -84,49 +80,15 @@ void HostBox3Component::process_usb_event(usb_audio_event_t *event) {
     }
 }
 
-void HostBox3Component::process_device_connection(uint8_t dev_addr) {
-    ESP_LOGI(TAG, "Traitement de la connexion du périphérique %d", dev_addr);
-}
-
-void HostBox3Component::process_device_disconnection() {
-    ESP_LOGI(TAG, "Traitement de la déconnexion du périphérique");
-}
-
-bool HostBox3Component::route_audio_to_usb() {
-    ESP_LOGI(TAG, "Routage du son vers l'USB");
-    return true;
-}
-
-void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg) {
-    auto *component = static_cast<HostBox3Component *>(arg);
-    
-    usb_audio_event_t event;
-    switch (event_msg->event) {
-        case USB_HOST_CLIENT_EVENT_NEW_DEV:
-            event.event_id = USB_AUDIO_DEVICE_CONNECTED;
-            event.data = (void *)(uintptr_t)event_msg->new_dev.address;
-            break;
-
-        case USB_HOST_CLIENT_EVENT_DEV_GONE:
-            event.event_id = USB_AUDIO_DEVICE_DISCONNECTED;
-            event.data = nullptr;
-            break;
-
-        default:
-            return;
-    }
-
-    component->process_usb_event(&event);
-}
-
 void HostBox3Component::update_usb_status(const std::string &status) {
     if (usb_status_sensor_) {
-        usb_status_sensor_->publish_state(status);
+        usb_status_sensor_->update_status(status);
     }
 }
 
 }  // namespace host_box3
 }  // namespace esphome
+
 
 
 

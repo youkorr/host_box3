@@ -17,10 +17,10 @@ HostBox3Component::~HostBox3Component() {
 void HostBox3Component::setup() {
     ESP_LOGI(TAG, "Configuration du périphérique USB Host");
 
-    gpio_set_direction(GPIO_NUM_19, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(GPIO_NUM_19, GPIO_FLOATING);
     gpio_set_direction(GPIO_NUM_20, GPIO_MODE_INPUT);
     gpio_set_pull_mode(GPIO_NUM_20, GPIO_FLOATING);
+    gpio_set_direction(GPIO_NUM_19, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_NUM_19, GPIO_FLOATING);
 
     this->init_usb_audio();
 

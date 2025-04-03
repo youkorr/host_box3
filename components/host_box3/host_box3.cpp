@@ -372,13 +372,14 @@ void HostBox3Component::configure_audio_device(usb_device_handle_t dev_hdl) {
     bool transfer_completed = false;
     for (int i = 0; i < 10; i++) {
         vTaskDelay(pdMS_TO_TICKS(50));
-        if (ctrl_xfer->status != 0) {  // Status 0 généralement indique "en cours"
+        // Dans ESP-IDF, les transferts en cours ont généralement un status différent de COMPLETED
+        if (ctrl_xfer->status == USB_TRANSFER_STATUS_COMPLETED) {
             transfer_completed = true;
             break;
         }
     }
     
-    if (!transfer_completed || ctrl_xfer->status != USB_TRANSFER_STATUS_COMPLETED) {
+    if (!transfer_completed) {
         ESP_LOGE(TAG, "SET_CONFIGURATION transfer failed or timed out: %d", ctrl_xfer->status);
         usb_host_transfer_free(ctrl_xfer);
         return;
@@ -401,11 +402,8 @@ void HostBox3Component::configure_audio_device(usb_device_handle_t dev_hdl) {
     ctrl_xfer->data_buffer[6] = 0;   // wLength LSB
     ctrl_xfer->data_buffer[7] = 0;   // wLength MSB
     
-    // Reset du statut du transfert
-    ctrl_xfer->status = 0;
-    ctrl_xfer->actual_num_bytes = 0;
-    
-    // Soumettre le transfert
+    // Soumettre un nouveau transfert
+    // Au lieu de réinitialiser le status, nous soumettons simplement un nouveau transfert
     err = usb_host_transfer_submit_control(this->client_hdl, ctrl_xfer);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to submit SET_INTERFACE control transfer: %s", esp_err_to_name(err));
@@ -417,13 +415,13 @@ void HostBox3Component::configure_audio_device(usb_device_handle_t dev_hdl) {
     transfer_completed = false;
     for (int i = 0; i < 10; i++) {
         vTaskDelay(pdMS_TO_TICKS(50));
-        if (ctrl_xfer->status != 0) {
+        if (ctrl_xfer->status == USB_TRANSFER_STATUS_COMPLETED) {
             transfer_completed = true;
             break;
         }
     }
     
-    if (!transfer_completed || ctrl_xfer->status != USB_TRANSFER_STATUS_COMPLETED) {
+    if (!transfer_completed) {
         ESP_LOGE(TAG, "SET_INTERFACE transfer failed or timed out: %d", ctrl_xfer->status);
         usb_host_transfer_free(ctrl_xfer);
         return;
@@ -456,6 +454,7 @@ void HostBox3Component::configure_audio_device(usb_device_handle_t dev_hdl) {
     ESP_LOGI(TAG, "USB Audio device configured successfully");
     ESP_LOGI(TAG, "Ready to stream audio to USB endpoint 0x%02x", this->usb_endpoint_addr);
 }
+
 void HostBox3Component::i2s_audio_callback(void *arg, void *data, size_t size) {
     HostBox3Component *self = static_cast<HostBox3Component*>(arg);
     

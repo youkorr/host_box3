@@ -1,6 +1,8 @@
 #include "host_box3.h"
 #include "esphome/core/log.h"
 #include "driver/gpio.h"
+#include "esp_log.h"
+#include "usb/usb_host.h"
 
 namespace esphome {
 namespace host_box3 {
@@ -19,12 +21,12 @@ void HostBox3Component::setup() {
     ESP_LOGI(TAG, "Setting up USB Host for ESP32-S3 Box 3...");
 
     // Configuration des broches USB en mode flottant
-    gpio_set_pull_mode(GPIO2, GPIO_FLOATING);  // USB D+ 
-    gpio_set_pull_mode(GPIO6, GPIO_FLOATING);  // USB D-
-    gpio_set_pull_mode(GPIO19, GPIO_FLOATING); // USB-
-    gpio_set_pull_mode(GPIO20, GPIO_FLOATING); // USB+
+    gpio_set_pull_mode(GPIO_NUM_2, GPIO_FLOATING);  // USB D+ 
+    gpio_set_pull_mode(GPIO_NUM_6, GPIO_FLOATING);  // USB D-
+    gpio_set_pull_mode(GPIO_NUM_19, GPIO_FLOATING); // USB-
+    gpio_set_pull_mode(GPIO_NUM_20, GPIO_FLOATING); // USB+
 
-    // Initialisation de l'USB Host
+    // Initialisation de l'USB Audio
     this->init_usb_audio();
 }
 
@@ -52,7 +54,6 @@ void HostBox3Component::init_usb_audio() {
 
     usb_host_client_config_t client_config = {
         .is_synchronous = false,
-        .max_num_events = 5,
         .async = {
             .client_event_callback = &HostBox3Component::client_event_callback,
             .callback_arg = this
@@ -96,6 +97,7 @@ void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t 
 
 }  // namespace host_box3
 }  // namespace esphome
+
 
 
 

@@ -28,11 +28,20 @@ static const gpio_num_t USB_DM_PIN = GPIO_NUM_19;  // D-
 
 // Définitions UAC (USB Audio Class)
 #define UAC_FORMAT_TYPE_I            0x01
-#define UAC_EP_GENERAL              0x01
+#define UAC_EP_GENERAL               0x01
 
 // Définitions pour les descripteurs USB
 #define USB_INTERFACE_MAX_ALT_SETTINGS 10
 #define USB_B_ENDPOINT_ADDRESS_EP_DIR_OUT 0x00
+// Define this if it's not defined
+#define USB_BM_ATTRIBUTES_XFER_ISOC      0x01
+#define USB_BM_REQUEST_TYPE_DIR_OUT      0x00
+#define USB_BM_REQUEST_TYPE_TYPE_STANDARD 0x00
+#define USB_BM_REQUEST_TYPE_RECIP_DEVICE  0x00
+#define USB_B_REQUEST_SET_CONFIGURATION   0x09
+
+// Défini comme l'opposé de EP_DIR_OUT (0x00)
+#define USB_B_ENDPOINT_ADDRESS_EP_DIR_IN  0x80
 
 HostBox3Component::HostBox3Component() 
     : usb_audio_initialized(false), 
@@ -205,11 +214,11 @@ void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t 
             
             ESP_LOGI(TAG, "USB device connected");
             
-            // Obtenir les descripteurs du périphérique
-            usb_device_desc_t dev_desc;
-            err = usb_host_device_desc_get(dev_hdl, &dev_desc);
+            // Utiliser la fonction usb_host_device_info pour obtenir les descripteurs
+            usb_device_info_t dev_info;
+            err = usb_host_device_info(dev_hdl, &dev_info);
             if (err != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to get device descriptor: %s", esp_err_to_name(err));
+                ESP_LOGE(TAG, "Failed to get device info: %s", esp_err_to_name(err));
                 usb_host_device_close(this->client_hdl, dev_hdl);
                 return;
             }
@@ -217,27 +226,24 @@ void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t 
             bool is_audio_device = false;
             
             // Vérifier si c'est un périphérique audio
-            if (dev_desc.bDeviceClass == USB_CLASS_PER_INTERFACE ||
-                dev_desc.bDeviceClass == USB_CLASS_AUDIO) {
+            if (dev_info.desc.bDeviceClass == USB_CLASS_PER_INTERFACE ||
+                dev_info.desc.bDeviceClass == USB_CLASS_AUDIO) {
                 
-                // Obtenir le descripteur de configuration
-                uint8_t config_desc_data[256]; // Buffer for the configuration descriptor
-                usb_config_desc_t *config_desc = (usb_config_desc_t *)config_desc_data;
-                
-                err = usb_host_get_device_config_desc(dev_hdl, config_desc_data, sizeof(config_desc_data));
-                if (err != ESP_OK) {
-                    ESP_LOGE(TAG, "Failed to get config descriptor: %s", esp_err_to_name(err));
-                    usb_host_device_close(this->client_hdl, dev_hdl);
-                    return;
-                }
+                // Obtenir tous les descripteurs de configuration
+                const usb_config_desc_t *config_desc = &dev_info.config_desc;
                 
                 // Parcourir toutes les interfaces
                 int offset = config_desc->bLength;
-                const uint8_t *ptr = config_desc_data + offset;
-                const uint8_t *end = config_desc_data + config_desc->wTotalLength;
+                const uint8_t *ptr = (const uint8_t *)config_desc + offset;
+                const uint8_t *end = (const uint8_t *)config_desc + config_desc->wTotalLength;
                 
                 while (ptr < end) {
                     const usb_standard_desc_t *desc = (const usb_standard_desc_t *)ptr;
+                    
+                    if (desc->bLength == 0 || ptr + desc->bLength > end) {
+                        // Protection contre les descripteurs invalides
+                        break;
+                    }
                     
                     if (desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
                         const usb_intf_desc_t *intf = (const usb_intf_desc_t *)desc;
@@ -253,6 +259,10 @@ void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t 
                             const uint8_t *ep_ptr = ptr + intf->bLength;
                             while (ep_ptr < end && ep_ptr < ptr + 128) { // Safety limit
                                 const usb_standard_desc_t *ep_desc = (const usb_standard_desc_t *)ep_ptr;
+                                
+                                if (ep_desc->bLength == 0 || ep_ptr + ep_desc->bLength > end) {
+                                    break; // Protection contre les descripteurs invalides
+                                }
                                 
                                 if (ep_desc->bDescriptorType == USB_B_DESCRIPTOR_TYPE_ENDPOINT) {
                                     const usb_ep_desc_t* ep = (const usb_ep_desc_t*)ep_desc;
@@ -323,22 +333,55 @@ void HostBox3Component::configure_audio_device(usb_device_handle_t dev_hdl) {
     ESP_LOGI(TAG, "Configuring USB Audio device...");
     
     // Activer la configuration (normalement configuration #1)
-    // In ESP-IDF, we first need to set the active configuration
-    esp_err_t err = usb_host_device_control_transfer(dev_hdl, 
-                                                 USB_BM_REQUEST_TYPE_DIR_OUT | 
-                                                 USB_BM_REQUEST_TYPE_TYPE_STANDARD |
-                                                 USB_BM_REQUEST_TYPE_RECIP_DEVICE,
-                                                 USB_B_REQUEST_SET_CONFIGURATION,
-                                                 1,   // Configuration value
-                                                 0,   // Index
-                                                 0,   // Length
-                                                 NULL, // Data
-                                                 1000); // Timeout
-    
+    // Utiliser un transfert de contrôle pour définir la configuration
+    usb_transfer_t *ctrl_xfer;
+    esp_err_t err = usb_host_transfer_alloc(64, 0, &ctrl_xfer);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set configuration: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to allocate control transfer: %s", esp_err_to_name(err));
         return;
     }
+    
+    // Configurer le transfert de contrôle pour SET_CONFIGURATION (1)
+    ctrl_xfer->device_handle = dev_hdl;
+    ctrl_xfer->bEndpointAddress = 0x00;  // Endpoint 0
+    ctrl_xfer->callback = NULL;
+    ctrl_xfer->context = NULL;
+    ctrl_xfer->timeout_ms = 1000;
+    ctrl_xfer->num_bytes = 8;  // Standard control request size
+    
+    // Setup packet for SET_CONFIGURATION
+    ctrl_xfer->data_buffer[0] = USB_BM_REQUEST_TYPE_DIR_OUT |
+                              USB_BM_REQUEST_TYPE_TYPE_STANDARD |
+                              USB_BM_REQUEST_TYPE_RECIP_DEVICE;  // bmRequestType
+    ctrl_xfer->data_buffer[1] = USB_B_REQUEST_SET_CONFIGURATION;  // bRequest
+    ctrl_xfer->data_buffer[2] = 1;   // wValue LSB (config value = 1)
+    ctrl_xfer->data_buffer[3] = 0;   // wValue MSB
+    ctrl_xfer->data_buffer[4] = 0;   // wIndex LSB
+    ctrl_xfer->data_buffer[5] = 0;   // wIndex MSB
+    ctrl_xfer->data_buffer[6] = 0;   // wLength LSB
+    ctrl_xfer->data_buffer[7] = 0;   // wLength MSB
+    
+    // Soumettre le transfert de contrôle
+    err = usb_host_transfer_submit_control(this->client_hdl, ctrl_xfer);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to submit control transfer: %s", esp_err_to_name(err));
+        usb_host_transfer_free(ctrl_xfer);
+        return;
+    }
+    
+    // Attendre la fin du transfert
+    while (ctrl_xfer->status == USB_TRANSFER_STATUS_PENDING) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    
+    if (ctrl_xfer->status != USB_TRANSFER_STATUS_COMPLETED) {
+        ESP_LOGE(TAG, "Control transfer failed: %d", ctrl_xfer->status);
+        usb_host_transfer_free(ctrl_xfer);
+        return;
+    }
+    
+    // Libérer le transfert de contrôle
+    usb_host_transfer_free(ctrl_xfer);
     
     // Réclamer l'interface audio
     err = usb_host_interface_claim(this->client_hdl, dev_hdl, this->usb_interface_num, this->usb_alt_setting);
@@ -424,7 +467,7 @@ void HostBox3Component::usb_transfer_callback(usb_transfer_t *transfer) {
         
         // Resubmit the transfer for more data if we're reading from the device
         // For OUT transfers (writes), we don't automatically resubmit
-        if ((transfer->bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK) == USB_B_ENDPOINT_ADDRESS_EP_DIR_IN) {
+        if ((transfer->bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK) != USB_B_ENDPOINT_ADDRESS_EP_DIR_OUT) {
             usb_host_transfer_submit(transfer);
         }
     } else {

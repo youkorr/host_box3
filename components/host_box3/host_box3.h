@@ -35,7 +35,7 @@ public:
 
 private:
     void init_usb_audio();
-    void configure_audio_device(uint8_t dev_addr);
+    void configure_audio_device(usb_device_handle_t dev_hdl);
     void send_audio_to_usb(uint8_t *data, size_t size);
     
     static void usb_task_function(void* arg);
@@ -47,7 +47,7 @@ private:
     bool usb_audio_initialized;
     TaskHandle_t usb_task_handle;
     usb_host_client_handle_t client_hdl;
-    uint8_t audio_dev_addr;  // Adresse du périphérique audio connecté
+    usb_device_handle_t audio_dev_handle;  // Handle du périphérique audio connecté
     
     audio_buffer_t audio_buffer;
     usb_transfer_t *audio_transfer;
@@ -62,6 +62,7 @@ private:
 
 }  // namespace host_box3
 }  // namespace esphome
+
 
 
 

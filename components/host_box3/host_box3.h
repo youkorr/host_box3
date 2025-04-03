@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 #include "usb/usb_host.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -17,7 +18,7 @@ typedef enum {
     USB_AUDIO_STREAM_STOPPED
 } usb_audio_event_id_t;
 
-// Structure pour stocker les événements USB audio
+// Structure des événements USB audio
 typedef struct {
     usb_audio_event_id_t event_id;
     void *data;
@@ -32,13 +33,13 @@ public:
     void loop() override;
     void dump_config() override;
 
-private:
+    void update_usb_status(const std::string &status);  // Met à jour le text_sensor
+
+protected:
     usb_host_client_handle_t client_hdl;
     bool usb_audio_initialized;
     TaskHandle_t usb_task_handle;
-    QueueHandle_t event_queue;
 
-    void setup_gpio_for_usb();
     void init_usb_audio();
     bool route_audio_to_usb();
     void process_usb_event(usb_audio_event_t *event);
@@ -47,10 +48,13 @@ private:
 
     static void client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg);
     static void usb_event_task(void *arg);
+
+    text_sensor::TextSensor *usb_status_sensor_; // Capteur texte pour le statut USB
 };
 
 }  // namespace host_box3
 }  // namespace esphome
+
 
 
 

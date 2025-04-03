@@ -30,13 +30,13 @@ void HostBox3Component::setup() {
 
 // Configuration des broches GPIO2 (D+) et GPIO6 (D-) en mode flottant
 void HostBox3Component::setup_gpio_for_usb() {
-    gpio_set_direction(GPIO_NUM_2, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(GPIO_NUM_2, GPIO_FLOATING);
+    gpio_set_direction(GPIO_NUM_19, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_NUM_19, GPIO_FLOATING);
 
-    gpio_set_direction(GPIO_NUM_6, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(GPIO_NUM_6, GPIO_FLOATING);
+    gpio_set_direction(GPIO_NUM_20, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_NUM_20, GPIO_FLOATING);
 
-    ESP_LOGI(TAG, "GPIO2 (D+) et GPIO6 (D-) configurés en mode flottant.");
+    ESP_LOGI(TAG, "GPIO19 (D+) et GPIO20 (D-) configurés en mode flottant.");
 }
 
 // Initialisation de l'USB audio

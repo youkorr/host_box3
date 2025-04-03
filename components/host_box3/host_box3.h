@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "usb/usb_host.h"
-#include <cstring>
+
 
 namespace esphome {
 namespace host_box3 {

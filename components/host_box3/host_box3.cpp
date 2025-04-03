@@ -191,7 +191,7 @@ void HostBox3Component::client_event_callback_static(const usb_host_client_event
 void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t *event_msg) {
     switch (event_msg->event) {
         case USB_HOST_CLIENT_EVENT_NEW_DEV: {
-            usb_device_handle_t dev_hdl = event_msg->new_dev.dev_hdl;
+            usb_device_handle_t dev_hdl = event_msg->new_dev.address;  // Fixed: use 'address' instead of 'dev_hdl'
             ESP_LOGI(TAG, "USB device connected");
             
             // Obtenir les descripteurs du périphérique
@@ -235,7 +235,10 @@ void HostBox3Component::client_event_callback(const usb_host_client_event_msg_t 
                             // Chercher un endpoint OUT (pour la lecture)
                             for (int ep_idx = 0; ep_idx < intf->bNumEndpoints; ep_idx++) {
                                 int ep_offset = offset;
-                                const usb_ep_desc_t* ep = usb_parse_endpoint_descriptor(intf, ep_idx, config_desc->wTotalLength, &ep_offset);
+                                // Fixed: use usb_parse_next_descriptor to find endpoint descriptors
+                                const usb_ep_desc_t* ep = (const usb_ep_desc_t*)usb_parse_next_descriptor(
+                                    (const uint8_t*)intf, config_desc->wTotalLength, &ep_offset, USB_DESCRIPTOR_TYPE_ENDPOINT);
+                                
                                 if (!ep) {
                                     continue;
                                 }
@@ -291,7 +294,8 @@ void HostBox3Component::configure_audio_device(usb_device_handle_t dev_hdl) {
     ESP_LOGI(TAG, "Configuring USB Audio device...");
     
     // Configurer la configuration active (normalement configuration #1)
-    esp_err_t err = usb_host_set_device_configuration(dev_hdl, 1);
+    // Fixed: use correct function name
+    esp_err_t err = usb_host_device_config_set(dev_hdl, 1);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set configuration: %s", esp_err_to_name(err));
         return;
@@ -351,8 +355,28 @@ void HostBox3Component::send_audio_to_usb(uint8_t *data, size_t size) {
     ESP_LOGI(TAG, "Audio data sent to USB (size: %d bytes)", copy_size);
 }
 
+// Implementation of usb_transfer_callback
+void HostBox3Component::usb_transfer_callback(usb_transfer_t *transfer) {
+    HostBox3Component *self = static_cast<HostBox3Component*>(transfer->context);
+    
+    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
+        ESP_LOGI(TAG, "USB transfer completed successfully, length: %d", transfer->actual_num_bytes);
+        
+        // Process received data if needed
+        if (self->audio_callback) {
+            self->audio_callback(self->audio_callback_arg, transfer->data_buffer, transfer->actual_num_bytes);
+        }
+        
+        // Resubmit the transfer for more data
+        usb_host_transfer_submit(transfer);
+    } else {
+        ESP_LOGW(TAG, "USB transfer error: %d", transfer->status);
+    }
+}
+
 }  // namespace host_box3
 }  // namespace esphome
+
 
 
 

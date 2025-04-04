@@ -18,8 +18,8 @@ namespace host_box3 {
 static const char *TAG = "host_box3";
 
 // Définition des broches USB pour ESP32-S3 Box 3
-static const gpio_num_t USB_DP_PIN = GPIO_NUM_20;  // D+
-static const gpio_num_t USB_DM_PIN = GPIO_NUM_19;  // D-
+static const gpio_num_t USB_DP_PIN = GPIO_NUM_21;  // D+
+static const gpio_num_t USB_DM_PIN = GPIO_NUM_42;  // D-
 
 // Classes USB audio
 #define USB_CLASS_AUDIO              0x01

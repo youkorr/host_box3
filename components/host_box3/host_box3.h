@@ -8,6 +8,7 @@
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "usb/uac_host.h"
 
 namespace esphome {
 namespace host_box3 {

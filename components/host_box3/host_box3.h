@@ -13,8 +13,8 @@
 namespace esphome {
 namespace host_box3 {
 
-static const gpio_num_t USB_DP_PIN = GPIO_NUM_21; // D+
-static const gpio_num_t USB_DM_PIN = GPIO_NUM_42; // D-
+static const gpio_num_t USB_DP_PIN = GPIO_NUM_20; // D+
+static const gpio_num_t USB_DM_PIN = GPIO_NUM_19; // D-
 
 class HostBox3Component : public Component {
 public:

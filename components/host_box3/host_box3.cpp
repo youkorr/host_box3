@@ -2,6 +2,7 @@
 #include "esphome/core/log.h"
 #include "driver/gpio.h"
 #include "usb/usb_host.h"
+#include "usb/uac_host.h"
 
 namespace esphome {
 namespace host_box3 {

@@ -3,6 +3,7 @@
 #include "driver/gpio.h"
 #include "usb/usb_host.h"
 #include "usb/uac_host.h"
+#include "bsp_board.h"
 
 namespace esphome {
 namespace host_box3 {
